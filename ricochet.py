@@ -222,10 +222,10 @@ class Move:
         ))
 
 
-def search(board, max_moves):
+def search(board, min_moves, max_moves):
     moves = []
     states_of_despair = {}
-    for remaining_moves in range(1, max_moves + 1):
+    for remaining_moves in range(min_moves, max_moves + 1):
         if search_rec(board, moves, remaining_moves, states_of_despair):
             print('Solution found in {} moves!'.format(len(moves)))
             for move in moves:
@@ -238,8 +238,8 @@ def search_rec(board, moves, remaining_moves, states_of_despair):
     if remaining_moves <= 0:
         return False
     current_state = board.robot_state()
-    tried_moves = states_of_despair.get(current_state)
-    if not tried_moves or tried_moves < remaining_moves:
+    tried_moves = states_of_despair.get(current_state, 0)
+    if tried_moves < remaining_moves:
         for move in board.possible_moves():
             move.execute()
             moves.append(move)
@@ -273,6 +273,13 @@ def search_rec(board, moves, remaining_moves, states_of_despair):
     default=9,
     required=False,
     help='Board height.'
+)
+@option(
+    '--min-moves',
+    type=int,
+    default=1,
+    required=False,
+    help='Starting search depth in number of moves. '
 )
 @option(
     '--max-moves',
@@ -312,9 +319,9 @@ def search_rec(board, moves, remaining_moves, states_of_despair):
     required=True,
     help='Place the goal with chess notation, i.e. a1, b2, etc.'
 )
-def main(width, height, max_moves, walls, robots, goal):
+def main(width, height, min_moves, max_moves, walls, robots, goal):
     board = Board(width, height, walls, robots, goal)
-    search(board, max_moves)
+    search(board, min_moves, max(max_moves, min_moves))
 
 
 if __name__ == '__main__':
