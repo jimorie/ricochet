@@ -31,6 +31,7 @@ class Board:
         self.height = height
         self.positions = [0] * (self.width * self.height)
         self.robots = robots
+        self.goal = goal
         for wall in walls:
             wall.place(self)
         for robot in robots:
@@ -59,12 +60,20 @@ class Board:
         if direction == WEST:
             return position - 1 if position % self.width else -1
 
+    def trace(self, position, direction):
+        blocker = ROBOT | FLIPDIRS[direction]
+        while True:
+            next_pos = self.neighbour(position, direction)
+            if next_pos < 0 or self.has(next_pos, blocker):
+                return position
+            position = next_pos
+
     def possible_moves(self):
-        return (
-            move
-            for robot in self.robots
-            for move in robot.possible_moves()
-        )
+        for robot in self.robots:
+            for direction in DIRECTIONS:
+                stop_position = self.trace(robot.position, direction)
+                if stop_position != robot.position:
+                    yield Move(robot, direction, robot.position, stop_position)
 
     def robot_state(self):
         return tuple(sorted(robot.position for robot in self.robots))
@@ -84,6 +93,34 @@ class Board:
 
     def position_to_chess(self, position):
         return self.xy_to_chess(*self.position_to_xy(position))
+
+    def search(self, min_moves, max_moves):
+        self.moves = []
+        self.states_of_despair = {}
+        for remaining_moves in range(min_moves, max_moves + 1):
+            if self.search_rec(remaining_moves):
+                print('Solution found in {} moves!'.format(len(self.moves)))
+                for move in self.moves:
+                    move.announce()
+                return
+        print('No solution found in {} moves.'.format(max_moves))
+
+    def search_rec(self, remaining_moves):
+        current_state = self.robot_state()
+        tried_moves = self.states_of_despair.get(current_state, 0)
+        if tried_moves < remaining_moves:
+            for move in self.possible_moves():
+                move.execute()
+                self.moves.append(move)
+                if self.has(self.goal.position, ROBOT):
+                    # We fucking did it!
+                    return True
+                if remaining_moves > 1 and self.search_rec(remaining_moves - 1):
+                    return True
+                self.moves.pop()
+                move.undo()
+            self.states_of_despair[current_state] = remaining_moves
+        return False
 
 
 class Placeable:
@@ -177,21 +214,6 @@ class Robot(Placeable):
         self.position = position
         self.board.add(self)
 
-    def possible_moves(self):
-        for direction in DIRECTIONS:
-            stop_position = self._plot(direction)
-            if stop_position != self.position:
-                yield Move(self, direction, self.position, stop_position)
-
-    def _plot(self, direction):
-        blocker = ROBOT | FLIPDIRS[direction]
-        current_pos = self.position
-        while True:
-            next_pos = self.board.neighbour(current_pos, direction)
-            if next_pos < 0 or self.board.has(next_pos, blocker):
-                return current_pos
-            current_pos = next_pos
-
 
 class Goal(Placeable):
     marker = GOAL
@@ -210,9 +232,6 @@ class Move:
     def undo(self):
         self.robot.move(self.start_position)
 
-    def reaches_goal(self):
-        return self.robot.board.has(self.stop_position, GOAL)
-
     def announce(self):
         print('{} moves {}: {} => {}'.format(
             self.robot.name,
@@ -220,43 +239,6 @@ class Move:
             self.robot.board.position_to_chess(self.start_position),
             self.robot.board.position_to_chess(self.stop_position)
         ))
-
-
-def search(board, min_moves, max_moves):
-    moves = []
-    states_of_despair = {}
-    for remaining_moves in range(min_moves, max_moves + 1):
-        if search_rec(board, moves, remaining_moves, states_of_despair):
-            print('Solution found in {} moves!'.format(len(moves)))
-            for move in moves:
-                move.announce()
-            return
-    print('No solution found in {} moves.'.format(max_moves))
-
-
-def search_rec(board, moves, remaining_moves, states_of_despair):
-    if remaining_moves <= 0:
-        return False
-    current_state = board.robot_state()
-    tried_moves = states_of_despair.get(current_state, 0)
-    if tried_moves < remaining_moves:
-        for move in board.possible_moves():
-            move.execute()
-            moves.append(move)
-            if move.reaches_goal():
-                # We fucking did it!
-                return True
-            if remaining_moves > 1 and search_rec(
-                board,
-                moves,
-                remaining_moves - 1,
-                states_of_despair
-            ):
-                return True
-            moves.pop()
-            move.undo()
-        states_of_despair[current_state] = remaining_moves
-    return False
 
 
 @command()
@@ -321,7 +303,7 @@ def search_rec(board, moves, remaining_moves, states_of_despair):
 )
 def main(width, height, min_moves, max_moves, walls, robots, goal):
     board = Board(width, height, walls, robots, goal)
-    search(board, min_moves, max(max_moves, min_moves))
+    board.search(min_moves, max(max_moves, min_moves))
 
 
 if __name__ == '__main__':
