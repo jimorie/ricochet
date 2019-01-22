@@ -19,6 +19,7 @@ SOUTH      = 1 << 2
 WEST       = 1 << 3
 ROBOT      = 1 << 4
 GOAL       = 1 << 5
+BLOCK      = 1 << 6
 DIRECTIONS = (NORTH, EAST, SOUTH, WEST)
 DIRNAMES   = {NORTH: 'north', EAST: 'east', SOUTH: 'south', WEST: 'west'}
 CHARDIRS   = {v[0]: k for k, v in DIRNAMES.items()}
@@ -26,7 +27,7 @@ FLIPDIRS   = {NORTH: SOUTH, EAST: WEST, SOUTH: NORTH, WEST: EAST}
 
 
 class Board:
-    def __init__(self, width, height, walls, robots, goal):
+    def __init__(self, width, height, walls, blocks, robots, goal):
         self.width = width
         self.height = height
         self.positions = [0] * (self.width * self.height)
@@ -34,6 +35,8 @@ class Board:
         self.goal = goal
         for wall in walls:
             wall.place(self)
+        for block in blocks:
+            block.place(self)
         for robot in robots:
             robot.place(self)
         goal.place(self)
@@ -61,7 +64,7 @@ class Board:
             return position - 1 if position % self.width else -1
 
     def trace(self, position, direction):
-        blocker = ROBOT | FLIPDIRS[direction]
+        blocker = ROBOT | BLOCK | FLIPDIRS[direction]
         while True:
             next_pos = self.neighbour(position, direction)
             if next_pos < 0 or self.has(next_pos, blocker):
@@ -200,6 +203,10 @@ class Wall(Placeable):
             Placeable.place(self.otherside, board)
 
 
+class Block(Placeable):
+    marker = BLOCK
+
+
 class Robot(Placeable):
     marker = ROBOT
     _robot_counter = 0
@@ -266,7 +273,7 @@ class Move:
 @option(
     '--max-moves',
     type=int,
-    default=20,
+    default=50,
     required=False,
     help='Maximum search depth in number of moves before giving up.'
 )
@@ -281,6 +288,14 @@ class Move:
         'Place a wall with chess notation plus a direction, i.e. a1n, b2w, '
         'etc. Mirror walls are placed automatically.'
     )
+)
+@option(
+    '--block',
+    '-b',
+    'blocks',
+    type=Block.from_string,
+    multiple=True,
+    help='Place a block that walls off an entire coordinate, similar to a fixed bot.'
 )
 @option(
     '--robot',
@@ -301,8 +316,8 @@ class Move:
     required=True,
     help='Place the goal with chess notation, i.e. a1, b2, etc.'
 )
-def main(width, height, min_moves, max_moves, walls, robots, goal):
-    board = Board(width, height, walls, robots, goal)
+def main(width, height, min_moves, max_moves, walls, blocks, robots, goal):
+    board = Board(width, height, walls, blocks, robots, goal)
     board.search(min_moves, max(max_moves, min_moves))
 
 
