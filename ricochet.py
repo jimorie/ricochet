@@ -20,6 +20,7 @@ WEST       = 1 << 3
 ROBOT      = 1 << 4
 GOAL       = 1 << 5
 BLOCK      = 1 << 6
+BOUNCER    = 1 << 7
 DIRECTIONS = (NORTH, EAST, SOUTH, WEST)
 DIRNAMES   = {NORTH: 'north', EAST: 'east', SOUTH: 'south', WEST: 'west'}
 CHARDIRS   = {v[0]: k for k, v in DIRNAMES.items()}
@@ -27,19 +28,19 @@ FLIPDIRS   = {NORTH: SOUTH, EAST: WEST, SOUTH: NORTH, WEST: EAST}
 
 
 class Board:
-    def __init__(self, width, height, walls, blocks, robots, goal):
-        self.width = width
-        self.height = height
+    def __init__(self, **kwargs):
+        self.width = kwargs['width']
+        self.height = kwargs['height']
         self.positions = [0] * (self.width * self.height)
-        self.robots = robots
-        self.goal = goal
-        for wall in walls:
-            wall.place(self)
-        for block in blocks:
-            block.place(self)
-        for robot in robots:
-            robot.place(self)
-        goal.place(self)
+        self.min_moves = kwargs['min_moves']
+        self.max_moves = max(kwargs['max_moves'], self.min_moves)
+        self.max_bounces = kwargs['max_bounces']
+        self.robots = kwargs['robots']
+        self.goal = kwargs['goal']
+        self.goal.place(self)
+        for group in ('walls', 'blocks', 'bouncers', 'robots'):
+            for placeable in kwargs[group]:
+                placeable.place(self)
 
     def add(self, placeable):
         self.positions[placeable.position] |= placeable.marker
@@ -63,20 +64,28 @@ class Board:
         if direction == WEST:
             return position - 1 if position % self.width else -1
 
-    def trace(self, position, direction):
+    def trace(self, position, direction, bounces=0):
         blocker = ROBOT | BLOCK | FLIPDIRS[direction]
         while True:
             next_pos = self.neighbour(position, direction)
             if next_pos < 0 or self.has(next_pos, blocker):
                 return position
+            if self.has(next_pos, BOUNCER):
+                if bounces >= self.max_bounces:
+                    raise BounceLoopException()
+                next_dir = FLIPDIRS[self.has(next_pos, ~(BOUNCER | direction))]
+                return self.trace(next_pos, next_dir, bounces + 1)
             position = next_pos
 
     def possible_moves(self):
         for robot in self.robots:
             for direction in DIRECTIONS:
-                stop_position = self.trace(robot.position, direction)
-                if stop_position != robot.position:
-                    yield Move(robot, direction, robot.position, stop_position)
+                try:
+                    stop_position = self.trace(robot.position, direction)
+                    if stop_position != robot.position:
+                        yield Move(robot, direction, robot.position, stop_position)
+                except BounceLoopException:
+                    pass
 
     def robot_state(self):
         return tuple(sorted(robot.position for robot in self.robots))
@@ -97,16 +106,16 @@ class Board:
     def position_to_chess(self, position):
         return self.xy_to_chess(*self.position_to_xy(position))
 
-    def search(self, min_moves, max_moves):
+    def search(self):
         self.moves = []
         self.states_of_despair = {}
-        for remaining_moves in range(min_moves, max_moves + 1):
+        for remaining_moves in range(self.min_moves, self.max_moves + 1):
             if self.search_rec(remaining_moves):
                 print('Solution found in {} moves!'.format(len(self.moves)))
                 for move in self.moves:
                     move.announce()
                 return
-        print('No solution found in {} moves.'.format(max_moves))
+        print('No solution found in {} moves.'.format(self.max_moves))
 
     def search_rec(self, remaining_moves):
         current_state = self.robot_state()
@@ -207,6 +216,33 @@ class Block(Placeable):
     marker = BLOCK
 
 
+class Bouncer(Placeable):
+    _bouncer_regex = re_compile(r'([a-z])(\d+)(ne|se|sw|nw)$')
+
+    def __init__(self, x, y, direction):
+        Placeable.__init__(self, x, y)
+        self.direction = direction
+
+    @classmethod
+    def from_string(cls, arg):
+        m = cls._bouncer_regex.match(arg)
+        if not m:
+            raise UsageError('Bad bouncer position: {}'.format(arg))
+        return cls(
+            ord(m.group(1)) - ord('a') + 1,
+            int(m.group(2)),
+            FLIPDIRS[CHARDIRS[m.group(3)[0]]] | FLIPDIRS[CHARDIRS[m.group(3)[1]]]
+        )
+
+    @property
+    def marker(self):
+        return BOUNCER | self.direction
+
+
+class BounceLoopException(Exception):
+    pass
+
+
 class Robot(Placeable):
     marker = ROBOT
     _robot_counter = 0
@@ -278,6 +314,13 @@ class Move:
     help='Maximum search depth in number of moves before giving up.'
 )
 @option(
+    '--max-bounces',
+    type=int,
+    default=50,
+    required=False,
+    help='Maximum number of bounces before calling it a loop.'
+)
+@option(
     '--wall',
     '-w',
     'walls',
@@ -298,6 +341,20 @@ class Move:
     help='Place a block that walls off an entire coordinate, similar to a fixed bot.'
 )
 @option(
+    '--bouncer',
+    '-o',
+    'bouncers',
+    type=Bouncer.from_string,
+    multiple=True,
+    help=(
+        'Place a bouncer with chess notation plus a diagonal direction, i.e. '
+        'b2ne, etc. When a robot move into a bouncer from one of the two '
+        'given directions it will be redirected in the other direction as '
+        'part of the same move. Bouncers act as a wall when moving into them '
+        'from any other direction.'
+    )
+)
+@option(
     '--robot',
     '-r',
     'robots',
@@ -316,9 +373,9 @@ class Move:
     required=True,
     help='Place the goal with chess notation, i.e. a1, b2, etc.'
 )
-def main(width, height, min_moves, max_moves, walls, blocks, robots, goal):
-    board = Board(width, height, walls, blocks, robots, goal)
-    board.search(min_moves, max(max_moves, min_moves))
+def main(**kwargs):
+    board = Board(**kwargs)
+    board.search()
 
 
 if __name__ == '__main__':

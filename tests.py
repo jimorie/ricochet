@@ -2,7 +2,18 @@ import unittest
 
 from ricochet import *
 
-board = Board(9, 9, [], [Robot(5, 5)], Goal(6, 6))
+board = Board(
+    width=9,
+    height=9,
+    min_moves=1,
+    max_moves=50,
+    max_bounces=50,
+    walls=[],
+    blocks=[],
+    bouncers=[],
+    robots=[Robot(5, 5)],
+    goal=Goal(6, 6)
+)
 
 def test_xy_conversions():
     for x in range(1, board.width + 1):
